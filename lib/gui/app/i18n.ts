@@ -5,12 +5,8 @@ import zh_TW_translation from './i18n/zh-TW';
 import en_translation from './i18n/en';
 
 export function langParser() {
-	if (process.env.LANG !== undefined) {
-		// Bypass mocha, where lang-detect don't works
-		return 'en';
-	}
-
-	const lang = Intl.DateTimeFormat().resolvedOptions().locale;
+	// Use browser locale detection (process.env not available in browser)
+	const lang = Intl.DateTimeFormat().resolvedOptions().locale || 'en';
 
 	switch (lang.substr(0, 2)) {
 		case 'zh':

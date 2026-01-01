@@ -7,6 +7,8 @@
     "node_modules/winusb-driver-generator/**",
     "node_modules/node-raspberrypi-usbboot/**",
     "node_modules/xxhash-addon/**",
-    "node_modules/axios/**"
+    "node_modules/axios/**",
+    "node_modules/ext2fs/**",
+    "node_modules/etcher-sdk/**"
   ]
 }

@@ -1,5 +1,6 @@
 /*
  * Copyright 2016 balena.io
+ * Copyright 2024 - Tauri Migration (Rust-native flashing)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +16,13 @@
  */
 
 import type { Drive as DrivelistDrive } from 'drivelist';
-import type * as sdk from 'etcher-sdk';
-import type { Dictionary } from 'lodash';
 import * as errors from '../../../shared/errors';
 import type { SourceMetadata } from '../../../shared/typings/source-selector';
 import * as flashState from '../models/flash-state';
-import * as settings from '../models/settings';
+import type { FlashProgressState } from '../models/flash-state';
 import * as windowProgress from '../os/window-progress';
-import { spawnChildAndConnect } from './api';
+import { flashImage, cancelFlash, FlashProgress } from './api-rust';
 
-let cancelEmitter: (type: string) => void | undefined;
 interface FlashResults {
 	skip?: boolean;
 	cancelled?: boolean;
@@ -38,100 +36,94 @@ interface FlashResults {
 	};
 }
 
+// Progress handler type
+type OnProgressFunction = (state: FlashProgressState) => void;
+
 async function performWrite(
 	image: SourceMetadata,
 	drives: DrivelistDrive[],
-	onProgress: sdk.multiWrite.OnProgressFunction,
+	onProgress: OnProgressFunction,
 ): Promise<{ cancelled?: boolean }> {
-	const { autoBlockmapping, decompressFirst } = await settings.getAll();
+	const flashResults: FlashResults = {};
 
-	// Spawn the child process with privileges and wait for the connection to be made
-	const { emit, registerHandler } = await spawnChildAndConnect({
-		withPrivileges: true,
-	});
+	// For now, we only support flashing to a single drive
+	// Multi-destination can be added later
+	if (drives.length === 0) {
+		throw errors.createUserError({
+			title: 'No target drive selected',
+			description: 'Please select a drive to flash the image to.',
+		});
+	}
 
-	return await new Promise((resolve, reject) => {
-		// if the connection failed, reject the promise
+	const targetDrive = drives[0];
+	const sourcePath = image.path;
 
-		const flashResults: FlashResults = {};
+	if (!sourcePath) {
+		throw errors.createUserError({
+			title: 'No source image selected',
+			description: 'Please select an image file to flash.',
+		});
+	}
 
-		const onFail = ({ device, error }: { device: any; error: any }) => {
-			console.log('fail event');
-			console.log(device);
-			console.log(error);
-			if (device.devicePath) {
-				flashState.addFailedDeviceError({ device, error });
+	console.log('Starting native Rust flash:', { sourcePath, targetDrive: targetDrive.device });
+
+	try {
+		// Use the native Rust flash implementation
+		const result = await flashImage(
+			sourcePath,
+			targetDrive.device,
+			true, // always verify
+			(progress: FlashProgress) => {
+				// Convert Rust progress to etcher-sdk compatible format
+				// Note: speed is in bytes/s from Rust, flash-state.ts will convert to MB/s
+				onProgress({
+					type: progress.stage,
+					percentage: progress.percentage,
+					eta: progress.eta ?? 0,
+					speed: progress.speed, // Keep in bytes/s, flash-state.ts converts to MB/s
+					active: progress.active,
+					failed: progress.failed,
+					bytesWritten: progress.bytesWritten,
+					bytes: progress.bytesWritten,
+					position: progress.bytesWritten,
+				});
 			}
-			finish();
+		);
+
+		console.log('Flash completed:', result);
+
+		flashResults.results = {
+			bytesWritten: result.bytesWritten,
+			devices: {
+				successful: result.devices.successful,
+				failed: result.devices.failed,
+			},
+			errors: result.errors.map((errMsg) => new Error(errMsg)),
 		};
 
-		const onDone = (payload: any) => {
-			console.log('CHILD: flash done', payload);
-			payload.results.errors = payload.results.errors.map(
-				(data: Dictionary<any> & { message: string }) => {
-					return errors.fromJSON(data);
-				},
-			);
-			flashResults.results = payload.results;
-			finish();
-		};
-
-		const onAbort = () => {
-			console.log('CHILD: flash aborted');
+		return flashResults;
+	} catch (error: any) {
+		console.error('Flash error details:', error);
+		const errorMessage = typeof error === 'string' ? error : (error.message || JSON.stringify(error));
+		
+		if (errorMessage?.includes('cancelled')) {
 			flashResults.cancelled = true;
-			finish();
-		};
-
-		const onSkip = () => {
-			console.log('CHILD: validation skipped');
-			flashResults.skip = true;
-			finish();
-		};
-
-		const finish = () => {
-			console.log('Flash results', flashResults);
-
-			// The flash wasn't cancelled and we didn't get a 'done' event
-			// Catch unexpected situation
-			if (
-				!flashResults.cancelled &&
-				!flashResults.skip &&
-				flashResults.results === undefined
-			) {
-				console.log(flashResults);
-				reject(
-					errors.createUserError({
-						title: 'The writer process ended unexpectedly',
-						description:
-							'Please try again, and contact the Etcher team if the problem persists',
-					}),
-				);
-			}
-
-			resolve(flashResults);
-		};
-
-		registerHandler('state', onProgress);
-		registerHandler('fail', onFail);
-		registerHandler('done', onDone);
-		registerHandler('abort', onAbort);
-		registerHandler('skip', onSkip);
-
-		cancelEmitter = (cancelStatus: string) => emit('cancel', cancelStatus);
-
-		// Now that we know we're connected we can instruct the child process to start the write
-		const parameters = {
-			image,
-			destinations: drives,
-			SourceType: image.SourceType,
-			autoBlockmapping,
-			decompressFirst,
-		};
-		console.log('params', parameters);
-		emit('write', parameters);
-	});
-
-	// The process continue in the event handler
+			return flashResults;
+		}
+		
+		// Check for permission errors
+		if (errorMessage?.includes('Permission denied') || errorMessage?.includes('Operation not permitted') || errorMessage?.includes('elevated privileges')) {
+			throw errors.createUserError({
+				title: 'Permission Required',
+				description: 'Writing to disk requires elevated privileges. On macOS, you may need to grant Full Disk Access to the app or run with sudo.',
+			});
+		}
+		
+		throw errors.createUserError({
+			title: 'Flash failed',
+			description: errorMessage || 'An unknown error occurred during flashing.',
+		});
+	}
 }
 
 /**
@@ -175,12 +167,11 @@ export async function flash(
 
 /**
  * @summary Cancel write operation
- * //TODO: find a better solution to handle cancellation
  */
-export async function cancel(type: string) {
-	const status = type.toLowerCase();
-
-	if (cancelEmitter) {
-		cancelEmitter(status);
+export async function cancel(_type: string) {
+	try {
+		await cancelFlash();
+	} catch (error) {
+		console.error('Error cancelling flash:', error);
 	}
 }

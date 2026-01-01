@@ -16,7 +16,7 @@
 
 import CircleSvg from '@fortawesome/fontawesome-free/svgs/solid/circle.svg';
 import * as _ from 'lodash';
-import * as path from 'path';
+import * as path from '../../../../shared/path-utils';
 import * as React from 'react';
 import { Flex, Modal as SmallModal, Txt } from 'rendition';
 

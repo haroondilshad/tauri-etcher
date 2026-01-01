@@ -1,0 +1,64 @@
+[package]
+name = "tauri-etcher"
+version = "2.1.4"
+description = "Flash OS images to SD cards and USB drives, safely and easily."
+authors = ["Balena Ltd."]
+edition = "2021"
+default-run = "tauri-etcher"
+
+# Main library
+[lib]
+name = "tauri_etcher_lib"
+path = "src/lib.rs"
+
+# Main Tauri application binary
+[[bin]]
+name = "tauri-etcher"
+path = "src/main.rs"
+
+# Helper binary for privileged operations
+[[bin]]
+name = "etcher-helper"
+path = "src/helper.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime for flash operations
+tokio = { version = "1", features = ["full"] }
+
+# Decompression support
+flate2 = "1.0"              # gzip
+xz2 = "0.1"                 # xz/lzma
+bzip2 = "0.5"               # bz2
+zip = "2.2"                 # zip archives
+
+# Checksum for verification
+crc32fast = "1.4"
+
+# Async channels for cancellation
+tokio-util = "0.7"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

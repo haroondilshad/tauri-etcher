@@ -105,12 +105,16 @@ const columns: Array<TableColumn<FlashError>> = [
 ];
 
 function getEffectiveSpeed(results: {
-	sourceMetadata: {
+	sourceMetadata?: {
 		size: number;
 		blockmappedSize?: number;
 	};
 	averageFlashingSpeed: number;
 }) {
+	// Handle case where sourceMetadata might be undefined
+	if (!results?.sourceMetadata?.size || !results.averageFlashingSpeed) {
+		return 0;
+	}
 	const flashedSize =
 		results.sourceMetadata.blockmappedSize ?? results.sourceMetadata.size;
 	const timeSpent = flashedSize / results.averageFlashingSpeed;

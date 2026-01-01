@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "default",
+  "description": "Default capabilities for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    "dialog:allow-open",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "opener:allow-open-url",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "process:allow-exit",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/etcher-util",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "node",
+          "cmd": "node",
+          "args": true
+        },
+        {
+          "name": "osascript",
+          "cmd": "osascript",
+          "args": true
+        },
+        {
+          "name": "powershell",
+          "cmd": "powershell",
+          "args": true
+        },
+        {
+          "name": "pkexec",
+          "cmd": "pkexec",
+          "args": true
+        },
+        {
+          "name": "sudo",
+          "cmd": "sudo",
+          "args": true
+        }
+      ]
+    }
+  ]
+}

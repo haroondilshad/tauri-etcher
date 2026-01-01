@@ -16,7 +16,7 @@
 
 import type { Drive } from 'drivelist';
 import { isNil } from 'lodash';
-import * as pathIsInside from 'path-is-inside';
+import { pathIsInside } from './path-utils';
 
 import * as messages from './messages';
 import type { SourceMetadata } from './typings/source-selector';

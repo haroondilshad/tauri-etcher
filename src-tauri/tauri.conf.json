@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "balenaEtcher",
+  "version": "2.1.4",
+  "identifier": "io.balena.etcher",
+  "build": {
+    "beforeDevCommand": "npm run dev:frontend",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build:frontend && npm run build:helper",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "balenaEtcher",
+        "width": 800,
+        "height": 480,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../assets/icon.png",
+      "../assets/icon.icns",
+      "../assets/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/etcher-helper"
+    ],
+    "macOS": {
+      "entitlements": "../entitlements.mac.plist",
+      "minimumSystemVersion": "10.13"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

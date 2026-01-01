@@ -9,6 +9,6 @@ jobs:
       - uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: Balena.Etcher
-          # matches something like "balenaEtcher-1.19.0.Setup.exe"
-          installers-regex: 'balenaEtcher-[\d.-]+\.Setup.exe$'
+          # Tauri produces: balenaEtcher_2.1.4_x64-setup.exe or balenaEtcher_2.1.4_x64_en-US.msi
+          installers-regex: 'balenaEtcher_[\d.]+_x64(-setup\.exe|_en-US\.msi)$'
           token: ${{ secrets.WINGET_PAT }}

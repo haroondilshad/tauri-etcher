@@ -55,8 +55,9 @@ const ETCHER_SERVER_ADDRESS = process.env.ETCHER_SERVER_ADDRESS as string;
 const ETCHER_SERVER_PORT = process.env.ETCHER_SERVER_PORT as string;
 // const ETCHER_SERVER_ID = process.env.ETCHER_SERVER_ID as string;
 
+// Increase default timeout to 30 seconds to allow for password prompt delays
 const ETCHER_TERMINATE_TIMEOUT: number = parseInt(
-	process.env.ETCHER_TERMINATE_TIMEOUT ?? '10000',
+	process.env.ETCHER_TERMINATE_TIMEOUT ?? '30000',
 	10,
 );
 
@@ -195,15 +196,19 @@ function setup(): Promise<EmitLog> {
 			 */
 			const onSourceMetadata = async (params: any) => {
 				log('sourceMetadata requested');
+				log('sourceMetadata params: ' + params);
 				const { selected, SourceType, auth } = JSON.parse(params);
+				log('sourceMetadata selected: ' + selected + ', SourceType: ' + SourceType);
 				try {
 					const sourceMatadata = await getSourceMetadata(
 						selected,
 						SourceType,
 						auth,
 					);
+					log('sourceMetadata result: ' + JSON.stringify(sourceMatadata));
 					emitSourceMetadata(sourceMatadata);
 				} catch (error: any) {
+					log('sourceMetadata error: ' + error.message);
 					emitFail(error);
 				}
 			};

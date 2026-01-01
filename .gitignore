@@ -121,3 +121,20 @@ secrets/WINDOWS_SIGNING.pfx
 #local development
 .yalc
 yalc.lock
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/binaries/etcher-helper-*
+src-tauri/WixTools/
+src-tauri/icons/*.ico.d
+*.AppImage
+*.deb
+*.dmg
+*.msi
+*.app
+*.exe
+
+# Vite build output
+dist/
+
+migration/

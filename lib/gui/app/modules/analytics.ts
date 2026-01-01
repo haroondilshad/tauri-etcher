@@ -15,38 +15,13 @@
  */
 
 import { findLastIndex, once } from 'lodash';
-import * as SentryRenderer from '@sentry/electron/renderer';
 import * as settings from '../models/settings';
 
-type AnalyticsPayload = _.Dictionary<any>;
+type AnalyticsPayload = Record<string, any>;
 
 const clearUserPath = (filename: string): string => {
 	const generatedFile = filename.split('generated').reverse()[0];
 	return generatedFile !== filename ? `generated${generatedFile}` : filename;
-};
-
-export const anonymizeSentryData = (
-	event: SentryRenderer.Event,
-): SentryRenderer.Event => {
-	event.exception?.values?.forEach((exception) => {
-		exception.stacktrace?.frames?.forEach((frame) => {
-			if (frame.filename) {
-				frame.filename = clearUserPath(frame.filename);
-			}
-		});
-	});
-
-	event.breadcrumbs?.forEach((breadcrumb) => {
-		if (breadcrumb.data?.url) {
-			breadcrumb.data.url = clearUserPath(breadcrumb.data.url);
-		}
-	});
-
-	if (event.request?.url) {
-		event.request.url = clearUserPath(event.request.url);
-	}
-
-	return event;
 };
 
 const extractPathRegex = /(.*)(^|\s)(file:\/\/)?(\w:)?([\\/].+)/;
@@ -113,28 +88,30 @@ export const anonymizeAnalyticsPayload = (
 
 /**
  * @summary Init analytics configurations
+ *
+ * @description
+ * In Tauri, we don't use Sentry as it's Electron-specific.
+ * This is a placeholder that can be replaced with a browser-compatible
+ * error reporting solution if needed.
  */
 export const initAnalytics = once(() => {
-	const dsn =
-		settings.getSync('analyticsSentryToken') || process.env.SENTRY_TOKEN;
-	SentryRenderer.init({
-		dsn,
-		beforeSend: anonymizeSentryData,
-		debug: process.env.ETCHER_SENTRY_DEBUG === 'true',
-	});
+	console.log('Analytics initialized (Tauri version - no Sentry)');
 });
 
 /**
  * @summary Log an exception
  *
  * @description
- * This function logs an exception to error reporting services.
+ * This function logs an exception. In the Tauri version,
+ * we only log to console. A browser-compatible error reporting
+ * service could be added here if needed.
  */
 export function logException(error: any) {
 	const shouldReportErrors = settings.getSync('errorReporting');
-	console.error(error);
+	console.error('Exception:', error);
 	if (shouldReportErrors) {
-		initAnalytics();
-		SentryRenderer.captureException(error);
+		// In a production Tauri app, you might want to use a
+		// browser-compatible error reporting service here
+		console.log('Error reporting enabled, error logged:', error?.message || error);
 	}
 }
