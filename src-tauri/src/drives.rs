@@ -526,6 +526,7 @@ pub fn unmount_disk(device: String) -> Result<(), String> {
     {
         // On Windows, use diskpart or PowerShell
         // For now, just return Ok - Windows handles this differently
+        let _ = device; // Suppress unused variable warning
         Ok(())
     }
     

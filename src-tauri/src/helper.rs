@@ -311,6 +311,11 @@ fn unmount_disk(device: &str) -> Result<(), String> {
             .output();
     }
     
+    #[cfg(target_os = "windows")]
+    {
+        let _ = device; // Windows handles unmount differently
+    }
+    
     Ok(())
 }
 

@@ -25,7 +25,7 @@ jobs:
             args: ''
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
-            args: ''
+            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -68,7 +68,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Build Tauri app (includes build:helper via npm run build)
+      # Build Tauri app (includes build:helper via beforeBuildCommand)
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -81,11 +81,6 @@ jobs:
           # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'balenaEtcher v__VERSION__'
-          releaseBody: 'See the assets for downloads.'
-          releaseDraft: true
-          prerelease: false
           args: ${{ matrix.args }}
 
       - name: Upload artifacts
