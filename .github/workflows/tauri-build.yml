@@ -17,7 +17,7 @@ jobs:
           - platform: 'macos-latest'
             target: 'aarch64-apple-darwin'
             args: '--target aarch64-apple-darwin'
-          - platform: 'macos-13'
+          - platform: 'macos-15-large'
             target: 'x86_64-apple-darwin'
             args: '--target x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
@@ -68,15 +68,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # Build frontend first (Tauri checks for dist at compile time)
-      - name: Build frontend
-        run: npm run build:frontend
-
-      # Build helper binary (creates placeholder first, then builds, then copies)
-      - name: Build helper binary
-        run: npm run build:helper
-
-      # Build and bundle Tauri app
+      # Build Tauri app (includes build:helper via npm run build)
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

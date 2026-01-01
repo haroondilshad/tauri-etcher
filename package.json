@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "npm run build:helper && npm run tauri dev",
     "dev:frontend": "vite",
-    "build": "npm run build:helper && npm run tauri build",
+    "build": "npm run tauri build",
     "build:frontend": "vite build",
     "build:helper": "node scripts/copy-helper.mjs --placeholder && cd src-tauri && cargo build --release --bin etcher-helper && cd .. && node scripts/copy-helper.mjs",
     "tauri": "tauri",
