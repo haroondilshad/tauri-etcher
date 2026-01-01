@@ -409,6 +409,9 @@ osascript -e 'display dialog "balenaEtcher needs privileged access in order to f
     // On Windows, run helper directly (Windows handles UAC separately)
     #[cfg(target_os = "windows")]
     let mut child = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        
         let mut cmd = Command::new(&helper_path);
         cmd.arg(&source_path)
             .arg(&dest_path)
@@ -417,6 +420,7 @@ osascript -e 'display dialog "balenaEtcher needs privileged access in order to f
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to spawn helper: {}", e))?
     };

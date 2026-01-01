@@ -407,8 +407,14 @@ fn list_drives_windows() -> Result<Vec<DriveInfo>, String> {
         } | ConvertTo-Json -Depth 3
     "#;
     
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+    #[cfg(target_os = "windows")]
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("Failed to run PowerShell: {}", e))?;
     
