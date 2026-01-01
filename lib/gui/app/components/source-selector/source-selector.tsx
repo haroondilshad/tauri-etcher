@@ -20,13 +20,20 @@ import LinkSvg from '@fortawesome/fontawesome-free/svgs/solid/link.svg';
 import ExclamationTriangleSvg from '@fortawesome/fontawesome-free/svgs/solid/triangle-exclamation.svg';
 import ChevronDownSvg from '@fortawesome/fontawesome-free/svgs/solid/chevron-down.svg';
 import ChevronRightSvg from '@fortawesome/fontawesome-free/svgs/solid/chevron-right.svg';
-import type { IpcRendererEvent } from 'electron';
-import { ipcRenderer } from 'electron';
 import { uniqBy, isNil } from 'lodash';
-import * as path from 'path';
+import * as path from '../../../../shared/path-utils';
 import prettyBytes from 'pretty-bytes';
 import * as React from 'react';
-import { requestMetadata } from '../../app';
+// Note: requestMetadata is exported from the main entry point
+// We use a dynamic import pattern to avoid circular dependencies
+let requestMetadataFn: any = undefined;
+
+// This will be set by the main entry point
+export function setRequestMetadata(fn: any) {
+	requestMetadataFn = fn;
+}
+
+const getRequestMetadata = () => requestMetadataFn;
 
 import type { ButtonProps } from 'rendition';
 import {
@@ -351,13 +358,12 @@ export class SourceSelector extends React.Component<
 		this.unsubscribe = observe(() => {
 			this.setState(getState());
 		});
-		ipcRenderer.on('select-image', this.onSelectImage);
-		ipcRenderer.send('source-selector-ready');
+		// Note: In Tauri, deep linking / protocol handling would be done
+		// via Tauri's event system. For now, we remove the Electron IPC.
 	}
 
 	public componentWillUnmount() {
 		this.unsubscribe?.();
-		ipcRenderer.removeListener('select-image', this.onSelectImage);
 	}
 
 	public componentDidUpdate(
@@ -374,7 +380,7 @@ export class SourceSelector extends React.Component<
 		}
 	}
 
-	private async onSelectImage(_event: IpcRendererEvent, imagePath: string) {
+	private async onSelectImage(imagePath: string) {
 		this.setState({ imageLoading: true });
 		await this.selectSource(
 			imagePath,
@@ -437,12 +443,16 @@ export class SourceSelector extends React.Component<
 						// FIXME: This is a poor man wait while loading to prevent a potential race condition without completely blocking the interface
 						// This should be addressed when refactoring the GUI
 						let retriesLeft = 10;
+						const requestMetadata = getRequestMetadata();
 						while (requestMetadata === undefined && retriesLeft > 0) {
 							await new Promise((resolve) => setTimeout(resolve, 1050)); // api is trying to connect every 1000, this is offset to make sure we fall between retries
 							retriesLeft--;
 						}
 
-						metadata = await requestMetadata({ selected, SourceType, auth });
+						const currentRequestMetadata = getRequestMetadata();
+						if (currentRequestMetadata) {
+							metadata = await currentRequestMetadata({ selected, SourceType, auth });
+						}
 
 						if (!metadata?.hasMBR && this.state.warning === null) {
 							this.setState({

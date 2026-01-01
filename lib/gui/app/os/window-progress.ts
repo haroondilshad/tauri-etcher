@@ -14,16 +14,13 @@
  * limitations under the License.
  */
 
-import * as remote from '@electron/remote';
-
-import { percentageToFloat } from '../../../shared/utils';
 import type { FlashState } from '../modules/progress-status';
 import { titleFromFlashState } from '../modules/progress-status';
 
 /**
  * @summary The title of the main window upon program launch
  */
-const INITIAL_TITLE = document.title;
+const INITIAL_TITLE = 'balenaEtcher';
 
 /**
  * @summary Make the full window status title
@@ -36,31 +33,25 @@ function getWindowTitle(state?: FlashState) {
 }
 
 /**
- * @summary A reference to the current renderer Electron window
- *
- * @description
- * We expose this property to `this` for testability purposes.
- */
-export const currentWindow = remote.getCurrentWindow();
-
-/**
  * @summary Set operating system window progress
  *
  * @description
- * Show progress inline in operating system task bar
+ * Show progress inline in operating system task bar.
+ * Note: Tauri doesn't have a direct setProgressBar API like Electron,
+ * but we can still update the window title to show progress.
  */
 export function set(state: FlashState) {
-	if (state.percentage != null) {
-		currentWindow.setProgressBar(percentageToFloat(state.percentage));
-	}
-	currentWindow.setTitle(getWindowTitle(state));
+	// Update document title to show progress
+	document.title = getWindowTitle(state);
+	
+	// Note: For taskbar progress in Tauri, we would need to use
+	// platform-specific Rust code or a Tauri plugin.
+	// For now, we just update the window title.
 }
 
 /**
  * @summary Clear the window progress bar
  */
 export function clear() {
-	// Passing 0 or null/undefined doesn't work.
-	currentWindow.setProgressBar(-1);
-	currentWindow.setTitle(getWindowTitle(undefined));
+	document.title = getWindowTitle(undefined);
 }

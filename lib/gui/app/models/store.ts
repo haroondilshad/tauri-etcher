@@ -16,8 +16,15 @@
 
 import * as Immutable from 'immutable';
 import * as _ from 'lodash';
-import { basename } from 'path';
 import * as redux from 'redux';
+
+// Browser-compatible basename function
+function basename(filePath: string): string {
+	if (!filePath) return '';
+	// Handle both Windows and Unix paths
+	const parts = filePath.replace(/\\/g, '/').split('/');
+	return parts[parts.length - 1] || parts[parts.length - 2] || '';
+}
 import { v4 as uuidV4 } from 'uuid';
 
 import * as constraints from '../../../shared/drive-constraints';

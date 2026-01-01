@@ -14,135 +14,163 @@
  * limitations under the License.
  */
 
-import { spawn, exec } from 'child_process';
-import { promisify } from 'util';
 import * as _ from 'lodash';
-import * as os from 'os';
-import * as semver from 'semver';
-
-import { sudo as darwinSudo } from './sudo/darwin';
-import { sudo as linuxSudo } from './sudo/linux';
-import { sudo as winSudo } from './sudo/windows';
-import * as errors from './errors';
-
-const execAsync = promisify(exec);
-
-/**
- * @summary The user id of the UNIX "superuser"
- */
-const UNIX_SUPERUSER_USER_ID = 0;
-
-// Augment the command to pass the environment variables as args
-// This is required because both windows and linux sudo commands strips the environment
-// variables when running the elevated command, so we need to pass them as arguments
-function commandWithEnv(
-	command: string[],
-	env: _.Dictionary<string | undefined>,
-): string[] {
-	const envFilter: string[] = [
-		'ETCHER_SERVER_ADDRESS',
-		'ETCHER_SERVER_PORT',
-		'ETCHER_SERVER_ID',
-		'ETCHER_NO_SPAWN_UTIL',
-		'ETCHER_TERMINATE_TIMEOUT',
-		'UV_THREADPOOL_SIZE',
-	];
-
-	return [
-		command[0],
-		...command.slice(1),
-		...Object.keys(env)
-			.filter((key) => Object.prototype.hasOwnProperty.call(env, key))
-			.filter((key) => envFilter.includes(key))
-			.map((key) => `--${key}=${env[key]}`),
-	];
-}
-
-export async function isElevated(): Promise<boolean> {
-	if (os.platform() === 'win32') {
-		// `fltmc` is available on WinPE, XP, Vista, 7, 8, and 10
-		// Works even when the "Server" service is disabled
-		// See http://stackoverflow.com/a/28268802
-		try {
-			await execAsync('fltmc');
-		} catch (error: any) {
-			if (error.code === os.constants.errno.EPERM) {
-				return false;
-			}
-			throw error;
-		}
-		return true;
-	}
-	return process.geteuid!() === UNIX_SUPERUSER_USER_ID;
-}
+import { invoke } from '@tauri-apps/api/core';
 
 /**
  * @summary Check if the current process is running with elevated permissions
+ * 
+ * In Tauri, we can't directly check this from the webview.
+ * The sidecar handles privilege elevation.
  */
-export function isElevatedUnixSync(): boolean {
-	return process.geteuid!() === UNIX_SUPERUSER_USER_ID;
+export async function isElevated(): Promise<boolean> {
+	// In Tauri, we delegate privilege checking to the Rust backend or sidecar
+	// For now, return false as the sidecar handles elevation
+	return false;
 }
 
+/**
+ * @summary Check if the current process is running with elevated permissions (sync)
+ */
+export function isElevatedUnixSync(): boolean {
+	// Can't check from browser context
+	return false;
+}
+
+/**
+ * @summary Elevate and execute a command
+ * 
+ * In Tauri, privilege elevation for the sidecar is handled differently.
+ * This function will spawn the sidecar with privilege elevation using
+ * Tauri's shell plugin which calls platform-specific sudo mechanisms.
+ */
 export async function elevateCommand(
 	command: string[],
 	options: {
-		env: _.Dictionary<string | undefined>;
+		env: Record<string, string | undefined>;
 		applicationName: string;
 	},
-): Promise<{ cancelled: boolean }> {
-	// if we're running with elevated privileges, we can just spawn the command
-	if (await isElevated()) {
-		spawn(command[0], command.slice(1), {
-			env: options.env,
-		});
-		return { cancelled: false };
-	}
-
+): Promise<{ cancelled: boolean; spawned?: any }> {
+	// Import Tauri shell dynamically to handle cases where it might not be available
 	try {
-		if (os.platform() === 'win32') {
-			const { cancelled } = await winSudo(commandWithEnv(command, options.env));
-			return { cancelled };
+		const { Command } = await import('@tauri-apps/plugin-shell');
+		
+		// Get platform to determine elevation strategy
+		const platform = navigator.platform.toLowerCase();
+		
+		// Build environment variables
+		const env: Record<string, string> = {};
+		for (const [key, value] of Object.entries(options.env)) {
+			if (value !== undefined) {
+				env[key] = value;
+			}
 		}
-		if (
-			os.platform() === 'darwin' &&
-			semver.compare(os.release(), '19.0.0') >= 0
-		) {
-			// >= macOS Catalina
-			const { cancelled } = await darwinSudo(command, options.env);
-			return { cancelled };
+
+		if (platform.includes('win')) {
+			// On Windows, use PowerShell with Start-Process -Verb RunAs
+			const args = command.slice(1).map(arg => `"${arg}"`).join(' ');
+			const psCommand = `Start-Process -FilePath "${command[0]}" -ArgumentList '${args}' -Verb RunAs -Wait`;
+			
+			const shellCmd = Command.create('powershell', ['-Command', psCommand], { env });
+			const child = await shellCmd.spawn();
+			
+			return { cancelled: false, spawned: child };
+		} else 		if (platform.includes('mac')) {
+			// On macOS, using osascript's "with administrator privileges" runs commands
+			// in a restricted root context where TCC blocks access to ~/Downloads.
+			// 
+			// Solution: Use `sudo -E --askpass` with a custom askpass script.
+			// - `-E` preserves the user's environment (HOME, PATH, file access)
+			// - `--askpass` uses a script to prompt for password via osascript dialog
+			// This runs the command as root while preserving file access permissions.
+			
+			const envFilter = [
+				'ETCHER_SERVER_ADDRESS',
+				'ETCHER_SERVER_PORT',
+				'ETCHER_SERVER_ID',
+				'ETCHER_NO_SPAWN_UTIL',
+				'ETCHER_TERMINATE_TIMEOUT',
+				'UV_THREADPOOL_SIZE',
+				'SKIP',
+			];
+			
+			// Build command with env as args: --KEY=value
+			const envArgs = Object.entries(env)
+				.filter(([key]) => envFilter.includes(key))
+				.map(([key, value]) => `--${key}=${value}`);
+			
+			// Handle 'node' command specially - use the SAME node that compiled the native modules
+			// The native modules (mountutils, drivelist) were compiled against a specific Node.js version
+			// We MUST use that same version or we'll get NODE_MODULE_VERSION mismatch errors
+			let cmdParts: string[];
+			if (command[0] === 'node' && command.length > 1) {
+				// Use absolute path to the NVM-managed Node.js that compiled the native modules
+				const nodePath = '/Users/callmenuwanda/.nvm/versions/node/v20.19.0/bin/node';
+				cmdParts = [nodePath, command[1]];
+			} else {
+				cmdParts = [command[0]];
+			}
+			
+			// Build the command string with proper escaping for sh -c
+			const escapedCmdParts = cmdParts.map(part => `'${part.replace(/'/g, "'\"'\"'")}'`).join(' ');
+			const argsStr = envArgs.map(arg => `'${arg.replace(/'/g, "'\"'\"'")}'`).join(' ');
+			
+			// Get the askpass script path - it's relative to this module
+			// In dev, it's in the source tree; in production, it would be bundled
+			const askpassPath = '/Users/callmenuwanda/Projects/my-new-appsa/tauri-etcher/lib/shared/sudo-askpass.sh';
+			
+			// Build the full command to run in background
+			// Run directly without backgrounding first - let's see the actual output/errors
+			const innerCommand = `${escapedCmdParts} ${argsStr}`;
+			
+			console.log('Elevating with sudo -E --askpass');
+			console.log('Command:', innerCommand);
+			
+			// Use sudo -E --askpass to run the command
+			// The askpass script will show a password dialog
+			// The -E flag preserves environment variables including those needed for disk access
+			const shellCmd = Command.create('sudo', ['-E', '--askpass', 'sh', '-c', innerCommand], {
+				env: {
+					...env,
+					SUDO_ASKPASS: askpassPath,
+					// Ensure PATH includes common locations for binaries
+					PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+				},
+			});
+			
+			// Listen for stdout/stderr to debug sidecar issues
+			shellCmd.on('close', (data: { code: number }) => {
+				console.log('osascript process exited with code:', data.code);
+			});
+			shellCmd.stdout.on('data', (data: string) => {
+				console.log('osascript stdout (PID):', data.trim());
+			});
+			shellCmd.stderr.on('data', (data: string) => {
+				console.log('osascript stderr:', data);
+			});
+			
+			const child = await shellCmd.spawn();
+			
+			return { cancelled: false, spawned: child };
+		} else {
+			// On Linux, try pkexec or sudo
+			// Try pkexec first (works with most desktop environments)
+			try {
+				const shellCmd = Command.create('pkexec', ['env', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), ...command]);
+				const child = await shellCmd.spawn();
+				return { cancelled: false, spawned: child };
+			} catch {
+				// Fall back to sudo with terminal
+				const shellCmd = Command.create('sudo', command, { env });
+				const child = await shellCmd.spawn();
+				return { cancelled: false, spawned: child };
+			}
 		}
 	} catch (error: any) {
-		throw errors.createError({ title: error.stderr });
-	}
-
-	try {
-		const { cancelled } = await linuxSudo(commandWithEnv(command, options.env));
-		return { cancelled };
-	} catch (error: any) {
-		// We're hardcoding internal error messages declared by `sudo-prompt`.
-		// There doesn't seem to be a better way to handle these errors, so
-		// for now, we should make sure we double check if the error messages
-		// have changed every time we upgrade `sudo-prompt`.
-		console.log('error', error);
-		if (_.includes(error.message, 'is not in the sudoers file')) {
-			throw errors.createUserError({
-				title: "Your user doesn't have enough privileges to proceed",
-				description:
-					'This application requires sudo privileges to be able to write to drives',
-			});
-		} else if (_.startsWith(error.message, 'Command failed:')) {
-			throw errors.createUserError({
-				title: 'The elevated process died unexpectedly',
-				description: `The process error code was ${error.code}`,
-			});
-		} else if (error.message === 'User did not grant permission.') {
+		console.error('Failed to elevate command:', error);
+		// Check if user cancelled
+		if (error.message?.includes('cancelled') || error.message?.includes('User did not grant permission')) {
 			return { cancelled: true };
-		} else if (error.message === 'No polkit authentication agent found.') {
-			throw errors.createUserError({
-				title: 'No polkit authentication agent found',
-				description:
-					'Please install a polkit authentication agent for your desktop environment of choice to continue',
-			});
 		}
 		throw error;
 	}

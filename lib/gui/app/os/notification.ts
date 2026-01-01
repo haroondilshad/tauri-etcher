@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import * as remote from '@electron/remote';
-
 import * as settings from '../models/settings';
 
 /**
@@ -27,10 +25,15 @@ export async function send(title: string, body: string, icon: string) {
 		return;
 	}
 
-	// `app.dock` is only defined in OS X
-	if (remote.app.dock) {
-		remote.app.dock.bounce();
+	// Use the Web Notification API which works in Tauri's webview
+	if ('Notification' in window) {
+		// Request permission if needed
+		if (Notification.permission === 'default') {
+			await Notification.requestPermission();
+		}
+		
+		if (Notification.permission === 'granted') {
+			return new Notification(title, { body, icon });
+		}
 	}
-
-	return new window.Notification(title, { body, icon });
 }

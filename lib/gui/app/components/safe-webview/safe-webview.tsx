@@ -14,46 +14,7 @@
  * limitations under the License.
  */
 
-import * as electron from 'electron';
-import * as remote from '@electron/remote';
-import * as _ from 'lodash';
 import * as React from 'react';
-
-import * as packageJSON from '../../../../../package.json';
-import * as settings from '../../models/settings';
-
-/**
- * @summary Electron session identifier
- */
-const ELECTRON_SESSION = 'persist:success-banner';
-
-/**
- * @summary Etcher version search-parameter key
- */
-const ETCHER_VERSION_PARAM = 'etcher-version';
-
-/**
- * @summary API version search-parameter key
- */
-const API_VERSION_PARAM = 'api-version';
-
-/**
- * @summary Opt-out analytics search-parameter key
- */
-const OPT_OUT_ANALYTICS_PARAM = 'optOutAnalytics';
-
-/**
- * @summary Webview API version
- *
- * @description
- * Changing this number represents a departure from an older API and as such
- * should only be changed when truly necessary as it introduces breaking changes.
- * This version number is exposed to the banner such that it can determine what
- * features are safe to utilize.
- *
- * See `git blame -L n` where n is the line below for the history of version changes.
- */
-const API_VERSION = '2';
 
 interface SafeWebviewProps {
 	// The website source URL
@@ -63,144 +24,26 @@ interface SafeWebviewProps {
 	style?: React.CSSProperties;
 }
 
-interface SafeWebviewState {
-	shouldShow: boolean;
-}
-
 /**
- * @summary Webviews that hide/show depending on the HTTP status returned
+ * @summary Stub component for SafeWebview
+ * 
+ * In the Electron version, this component displayed a webview with
+ * featured projects during flashing. Since Tauri doesn't support
+ * the <webview> tag, we simply don't render this content.
+ * 
+ * The onWebviewShow callback is called with false to indicate
+ * the webview is not showing, which adjusts the layout accordingly.
  */
-export class SafeWebview extends React.PureComponent<
-	SafeWebviewProps,
-	SafeWebviewState
-> {
-	private entryHref: string;
-	private session: electron.Session;
-	private webviewRef: React.RefObject<electron.WebviewTag>;
-
-	constructor(props: SafeWebviewProps) {
-		super(props);
-		this.webviewRef = React.createRef();
-		this.state = {
-			shouldShow: true,
-		};
-		const url = new window.URL(this.props.src);
-		// We set the version GET parameters here.
-		url.searchParams.set(ETCHER_VERSION_PARAM, packageJSON.version);
-		url.searchParams.set(API_VERSION_PARAM, API_VERSION);
-		url.searchParams.set(
-			OPT_OUT_ANALYTICS_PARAM,
-			(!settings.getSync('errorReporting')).toString(),
-		);
-		this.entryHref = url.href;
-		// Events steal 'this'
-		this.handleDomReady = _.bind(this.handleDomReady, this);
-		this.didFailLoad = _.bind(this.didFailLoad, this);
-		this.didGetResponseDetails = _.bind(this.didGetResponseDetails, this);
-		// Make a persistent electron session for the webview
-		this.session = remote.session.fromPartition(ELECTRON_SESSION, {
-			// Disable the cache for the session such that new content shows up when refreshing
-			cache: false,
-		});
-	}
-
-	private static logWebViewMessage(event: electron.ConsoleMessageEvent) {
-		console.log('Message from SafeWebview:', event.message);
-	}
-
-	public render() {
-		const {
-			style = {
-				flex: this.state.shouldShow ? undefined : '0 1',
-				width: this.state.shouldShow ? undefined : '0',
-				height: this.state.shouldShow ? undefined : '0',
-			},
-		} = this.props;
-		return (
-			<webview
-				ref={this.webviewRef}
-				partition={ELECTRON_SESSION}
-				style={style}
-				// @ts-ignore
-				allowpopups="true"
-			/>
-		);
-	}
-
-	// Add the Webview events
+export class SafeWebview extends React.PureComponent<SafeWebviewProps> {
 	public componentDidMount() {
-		// Events React is unaware of have to be handled manually
-		if (this.webviewRef.current !== null) {
-			this.webviewRef.current.addEventListener(
-				'did-fail-load',
-				this.didFailLoad,
-			);
-			this.webviewRef.current.addEventListener(
-				'dom-ready',
-				this.handleDomReady,
-			);
-			this.webviewRef.current.addEventListener(
-				'console-message',
-				SafeWebview.logWebViewMessage,
-			);
-			this.session.webRequest.onCompleted(this.didGetResponseDetails);
-			// It's important that this comes after the partition setting, otherwise it will
-			// use another session and we can't change it without destroying the element again
-			this.webviewRef.current.src = this.entryHref;
-		}
-	}
-
-	// Remove the Webview events
-	public componentWillUnmount() {
-		// Events that React is unaware of have to be handled manually
-		if (this.webviewRef.current !== null) {
-			this.webviewRef.current.removeEventListener(
-				'did-fail-load',
-				this.didFailLoad,
-			);
-			this.webviewRef.current.removeEventListener(
-				'dom-ready',
-				this.handleDomReady,
-			);
-			this.webviewRef.current.removeEventListener(
-				'console-message',
-				SafeWebview.logWebViewMessage,
-			);
-		}
-		this.session.webRequest.onCompleted(null);
-	}
-
-	handleDomReady() {
-		const webview = this.webviewRef.current;
-		if (webview == null) {
-			return;
-		}
-		const id = webview.getWebContentsId();
-		electron.ipcRenderer.send('webview-dom-ready', id);
-	}
-
-	// Set the element state to hidden
-	public didFailLoad() {
-		this.setState({
-			shouldShow: false,
-		});
+		// Notify parent that webview is not showing
 		if (this.props.onWebviewShow) {
 			this.props.onWebviewShow(false);
 		}
 	}
 
-	// Set the element state depending on the HTTP response code
-	public didGetResponseDetails(event: electron.OnCompletedListenerDetails) {
-		// This seems to pick up all requests related to the webview,
-		// only care about this event if it's a request for the main frame
-		if (event.resourceType === 'mainFrame') {
-			const HTTP_OK = 200;
-			this.setState({
-				shouldShow: event.statusCode === HTTP_OK,
-			});
-			if (this.props.onWebviewShow) {
-				this.props.onWebviewShow(event.statusCode === HTTP_OK);
-			}
-		}
+	public render() {
+		// Don't render anything - webview not supported in Tauri
+		return null;
 	}
 }

@@ -18,7 +18,7 @@ import CogSvg from '@fortawesome/fontawesome-free/svgs/solid/gear.svg';
 import CloseSvg from '@fortawesome/fontawesome-free/svgs/solid/x.svg';
 import QuestionCircleSvg from '@fortawesome/fontawesome-free/svgs/solid/circle-question.svg';
 
-import * as path from 'path';
+import * as path from '../../../../shared/path-utils';
 import prettyBytes from 'pretty-bytes';
 import * as React from 'react';
 import { Alert, Flex, Link } from 'rendition';

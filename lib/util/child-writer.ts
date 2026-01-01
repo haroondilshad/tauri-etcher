@@ -42,12 +42,16 @@ import { omit } from 'lodash';
 import { emitLog, emitState, emitFail } from './api';
 
 async function write(options: WriteOptions) {
+	console.log('=== WRITE STARTED ===');
+	console.log('Options:', JSON.stringify(options, null, 2));
+	
 	/**
 	 * @summary Failure handler (non-fatal errors)
 	 * @param {SourceDestination} destination - destination
 	 * @param {Error} error - error
 	 */
 	const onFail = (destination: SourceDestination, error: Error) => {
+		console.log('onFail called:', error.message);
 		emitFail({
 			// TODO: device should be destination
 
@@ -115,6 +119,10 @@ async function write(options: WriteOptions) {
 			}
 		}
 
+		console.log('=== STARTING writeAndValidate ===');
+		console.log('Source:', source?.constructor?.name);
+		console.log('Destinations:', dests.length);
+		
 		const results = await writeAndValidate({
 			source,
 			destinations: dests,
@@ -125,9 +133,23 @@ async function write(options: WriteOptions) {
 			onFail,
 		});
 
+		console.log('=== writeAndValidate COMPLETED ===');
+		console.log('Results:', JSON.stringify(results, null, 2));
+		
 		return results;
 	} catch (error: any) {
-		return { errors: [error] };
+		console.error('=== WRITE ERROR ===');
+		console.error('Write error:', error);
+		// Return a proper result structure even on error
+		return {
+			bytesWritten: 0,
+			devices: {
+				failed: options.destinations.length,
+				successful: 0,
+			},
+			errors: [error],
+			sourceMetadata: options.image,
+		};
 	}
 }
 

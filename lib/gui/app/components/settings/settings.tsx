@@ -19,7 +19,10 @@ import * as _ from 'lodash';
 import * as React from 'react';
 import { Box, Checkbox, Flex, Txt } from 'rendition';
 
-import { version, packageType } from '../../../../../package.json';
+import { version } from '../../../../../package.json';
+
+// In Tauri, we don't have packageType - auto-updates handled differently
+const packageType = 'tauri';
 import * as settings from '../../models/settings';
 import { open as openExternal } from '../../os/open-external/services/open-external';
 import { Modal } from '../../styled-components';

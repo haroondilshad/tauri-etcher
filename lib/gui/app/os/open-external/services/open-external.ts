@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import * as electron from 'electron';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import * as settings from '../../../models/settings';
 
 /**
@@ -27,6 +27,6 @@ export async function open(url: string) {
 	}
 
 	if (url) {
-		electron.shell.openExternal(url);
+		await openUrl(url);
 	}
 }

@@ -12,9 +12,8 @@
  *  - centralise the api for both the writer and the scanner instead of having two instances running
  */
 
-import WebSocket from 'ws'; // (no types for wrapper, this is expected)
-import { spawn, exec } from 'child_process';
-import * as os from 'os';
+import { invoke } from '@tauri-apps/api/core';
+import { Command } from '@tauri-apps/plugin-shell';
 import * as packageJSON from '../../../../package.json';
 import * as permissions from '../../../shared/permissions';
 import * as errors from '../../../shared/errors';
@@ -23,23 +22,30 @@ const THREADS_PER_CPU = 16;
 const connectionRetryDelay = 1000;
 const connectionRetryAttempts = 10;
 
-async function writerArgv(): Promise<string[]> {
-	let entryPoint = await window.etcher.getEtcherUtilPath();
-	// AppImages run over FUSE, so the files inside the mount point
-	// can only be accessed by the user that mounted the AppImage.
-	// This means we can't re-spawn Etcher as root from the same
-	// mount-point, and as a workaround, we re-mount the original
-	// AppImage as root.
-	if (os.platform() === 'linux' && process.env.APPIMAGE && process.env.APPDIR) {
-		entryPoint = entryPoint.replace(process.env.APPDIR, '');
-		return [
-			process.env.APPIMAGE,
-			'-e',
-			`require(\`\${process.env.APPDIR}${entryPoint}\`)`,
-		];
-	} else {
-		return [entryPoint];
+// Use Node.js directly instead of pkg-bundled binary (to avoid ext2fs WASM loading issues)
+const USE_NODE_DIRECTLY = true;
+
+// Check if we're running in a Tauri environment
+function isTauriEnvironment(): boolean {
+	return typeof window !== 'undefined' && '__TAURI__' in window;
+}
+
+// Get the number of CPUs (fallback for browser environment)
+function getCpuCount(): number {
+	return navigator.hardwareConcurrency || 4;
+}
+
+// Get the sidecar path from Tauri backend
+async function getSidecarPath(): Promise<string> {
+	if (!isTauriEnvironment()) {
+		throw new Error('Not running in Tauri environment');
 	}
+	return await invoke<string>('get_sidecar_path');
+}
+
+async function writerArgv(): Promise<string[]> {
+	const entryPoint = await getSidecarPath();
+	return [entryPoint];
 }
 
 async function spawnChild(
@@ -48,40 +54,77 @@ async function spawnChild(
 	etcherServerAddress: string,
 	etcherServerPort: string,
 ) {
-	const argv = await writerArgv();
-	const env: any = {
+	// Check if we're in Tauri environment
+	if (!isTauriEnvironment()) {
+		throw new Error('Sidecar spawning requires Tauri environment. Open this app in the Tauri window, not a browser.');
+	}
+
+	const env: Record<string, string> = {
 		ETCHER_SERVER_ADDRESS: etcherServerAddress,
 		ETCHER_SERVER_ID: etcherServerId,
 		ETCHER_SERVER_PORT: etcherServerPort,
-		UV_THREADPOOL_SIZE: (os.cpus().length * THREADS_PER_CPU).toString(),
+		UV_THREADPOOL_SIZE: (getCpuCount() * THREADS_PER_CPU).toString(),
 		// This environment variable prevents the AppImages
 		// desktop integration script from presenting the
 		// "installation" dialog
 		SKIP: '1',
-		...(process.platform === 'win32' ? {} : process.env),
 	};
 
-	if (withPrivileges) {
-		console.log('... with privileges ...');
-		return permissions.elevateCommand(argv, {
-			applicationName: packageJSON.displayName,
-			env,
-		});
-	} else {
-		if (process.platform === 'win32') {
-			// we need to ensure we reset the env as a previous elevation process might have kept them in a wrong state
-			const envCommand = [];
-			for (const key in env) {
-				if (Object.prototype.hasOwnProperty.call(env, key)) {
-					envCommand.push(`set ${key}=${env[key]}`);
-				}
-			}
-			await exec(envCommand.join(' && '));
+	if (USE_NODE_DIRECTLY) {
+		// Use Node.js to run the sidecar script directly (bypasses pkg WASM issues)
+		const sidecarScriptPath = await invoke<string>('get_sidecar_script_path');
+		console.log('Using Node.js to run sidecar script:', sidecarScriptPath);
+		
+		if (withPrivileges) {
+			console.log('... with privileges ...');
+			// For privileged, we need to run node with sudo
+			return permissions.elevateCommand(['node', sidecarScriptPath], {
+				applicationName: packageJSON.displayName,
+				env,
+			});
+		} else {
+			// Spawn node directly with the script
+			const command = Command.create('node', [sidecarScriptPath], { env });
+			
+			command.stdout.on('data', (data: string) => {
+				console.log('Sidecar stdout:', data);
+			});
+			command.stderr.on('data', (data: string) => {
+				console.log('Sidecar stderr:', data);
+			});
+			command.on('close', (data: { code: number }) => {
+				console.log('Sidecar exited with code:', data.code);
+			});
+			
+			const child = await command.spawn();
+			console.log('Spawned unprivileged sidecar (via Node.js) with PID:', child.pid);
+			
+			return { cancelled: false, spawned: child };
 		}
-		const spawned = await spawn(argv[0], argv.slice(1), {
-			env,
-		});
-		return { cancelled: false, spawned };
+	} else {
+		// Original path: use pkg-bundled binary
+		const argv = await writerArgv();
+		
+		if (withPrivileges) {
+			console.log('... with privileges ...');
+			return permissions.elevateCommand(argv, {
+				applicationName: packageJSON.displayName,
+				env,
+			});
+		} else {
+			// Use Tauri's shell plugin to spawn the sidecar
+			// The sidecar name must match the path in tauri.conf.json's externalBin
+			const command = Command.sidecar('binaries/etcher-util', [], {
+				env,
+			});
+
+			// For unprivileged spawn, we use a direct spawn approach
+			// The sidecar will start its own WebSocket server
+			const child = await command.spawn();
+			console.log('Spawned unprivileged sidecar with PID:', child.pid);
+			
+			return { cancelled: false, spawned: child };
+		}
 	}
 }
 
@@ -97,18 +140,16 @@ async function connectToChildProcess(
 	etcherServerId: string,
 ): Promise<ChildApi | { failed: boolean }> {
 	return new Promise((resolve, reject) => {
-		// TODO: default to IPC connections https://github.com/websockets/ws/blob/master/doc/ws.md#ipc-connections
-		// TODO: use the path as cheap authentication
-
 		console.log(etcherServerId);
 
 		const url = `ws://${etcherServerAddress}:${etcherServerPort}`;
 
+		// Use browser WebSocket API
 		const ws = new WebSocket(url);
 
-		let heartbeat: any;
+		let heartbeat: ReturnType<typeof setInterval>;
 
-		const startHeartbeat = (emit: any) => {
+		const startHeartbeat = (emit: (type: string, payload: any) => void) => {
 			console.log('start heartbeat');
 			heartbeat = setInterval(() => {
 				emit('heartbeat', {});
@@ -120,20 +161,14 @@ async function connectToChildProcess(
 			clearInterval(heartbeat);
 		};
 
-		ws.on('error', (error: any) => {
-			if (error.code === 'ECONNREFUSED') {
-				resolve({
-					failed: true,
-				});
-			} else {
-				stopHeartbeat();
-				reject({
-					failed: true,
-				});
-			}
-		});
+		ws.onerror = (error: Event) => {
+			console.log('WebSocket error:', error);
+			resolve({
+				failed: true,
+			});
+		};
 
-		ws.on('open', () => {
+		ws.onopen = () => {
 			const emit = (type: string, payload: any) => {
 				ws.send(JSON.stringify({ type, payload }));
 			};
@@ -141,7 +176,7 @@ async function connectToChildProcess(
 			emit('ready', {});
 
 			// parse and route messages
-			const messagesHandler: any = {
+			const messagesHandler: Record<string, (payload: any) => void> = {
 				log: (message: any) => {
 					console.log(`CHILD LOG: ${message}`);
 				},
@@ -166,21 +201,21 @@ async function connectToChildProcess(
 				},
 			};
 
-			ws.on('message', (jsonData: any) => {
-				const data = JSON.parse(jsonData);
+			ws.onmessage = (event: MessageEvent) => {
+				const data = JSON.parse(event.data);
 				const message = messagesHandler[data.type];
 				if (message) {
 					message(data.payload);
 				} else {
-					throw new Error(`Unknown message type: ${data.type}`);
+					console.warn(`Unknown message type: ${data.type}`);
 				}
-			});
+			};
 
 			// api to register more handlers with callbacks
-			const registerHandler = (event: string, handler: any) => {
+			const registerHandler = (event: string, handler: (payload: any) => void) => {
 				messagesHandler[event] = handler;
 			};
-		});
+		};
 	});
 }
 
@@ -189,12 +224,9 @@ async function spawnChildAndConnect({
 }: {
 	withPrivileges: boolean;
 }): Promise<ChildApi> {
-	const etcherServerAddress = process.env.ETCHER_SERVER_ADDRESS ?? '127.0.0.1'; // localhost
-	const etcherServerPort =
-		process.env.ETCHER_SERVER_PORT ?? withPrivileges ? '3435' : '3434';
-	const etcherServerId =
-		process.env.ETCHER_SERVER_ID ??
-		`etcher-${Math.random().toString(36).substring(7)}`;
+	const etcherServerAddress = '127.0.0.1'; // localhost
+	const etcherServerPort = withPrivileges ? '3435' : '3434';
+	const etcherServerId = `etcher-${Math.random().toString(36).substring(7)}`;
 
 	console.log(
 		`Starting ${
@@ -203,22 +235,19 @@ async function spawnChildAndConnect({
 	);
 
 	// spawn the child process, which will act as the ws server
-	// ETCHER_NO_SPAWN_UTIL can be set to launch a GUI only version of etcher, in that case you'll probably want to set other ENV to match your setup
-	if (!process.env.ETCHER_NO_SPAWN_UTIL) {
-		try {
-			const result = await spawnChild(
-				withPrivileges,
-				etcherServerId,
-				etcherServerAddress,
-				etcherServerPort,
-			);
-			if (result.cancelled) {
-				throw new Error('Starting flasher sidecar process was cancelled');
-			}
-		} catch (error) {
-			console.error('Error starting flasher sidecar process', error);
-			throw new Error('Error starting flasher sidecar process');
+	try {
+		const result = await spawnChild(
+			withPrivileges,
+			etcherServerId,
+			etcherServerAddress,
+			etcherServerPort,
+		);
+		if (result.cancelled) {
+			throw new Error('Starting flasher sidecar process was cancelled');
 		}
+	} catch (error) {
+		console.error('Error starting flasher sidecar process', error);
+		throw new Error('Error starting flasher sidecar process');
 	}
 
 	// try to connect to the ws server, retrying if necessary, until the connection is established
@@ -242,7 +271,6 @@ async function spawnChildAndConnect({
 			}
 			return { failed, emit, registerHandler };
 		}
-		// TODO: raised an error to the user if we reach this point
 		throw new Error('Connection to sidecar flasher process timed out');
 	} catch (error) {
 		console.error('Error connecting to sidecar flasher process process', error);

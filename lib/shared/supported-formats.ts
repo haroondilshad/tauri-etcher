@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { basename } from 'path';
+import { basename } from './path-utils';
 
 export const SUPPORTED_EXTENSIONS = [
 	'bin',

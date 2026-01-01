@@ -14,26 +14,12 @@
  * limitations under the License.
  */
 
-import * as electron from 'electron';
-import * as remote from '@electron/remote';
+import { open as tauriOpen, message as tauriMessage, ask as tauriAsk } from '@tauri-apps/plugin-dialog';
 import * as _ from 'lodash';
 
 import * as errors from '../../../shared/errors';
-import * as settings from '../../../gui/app/models/settings';
 import { SUPPORTED_EXTENSIONS } from '../../../shared/supported-formats';
 import * as i18next from 'i18next';
-
-async function mountSourceDrive() {
-	// sourceDrivePath is the name of the link in /dev/disk/by-path
-	const sourceDrivePath = await settings.get('automountOnFileSelect');
-	if (sourceDrivePath) {
-		try {
-			await electron.ipcRenderer.invoke('mount-drive', sourceDrivePath);
-		} catch (error: any) {
-			// noop
-		}
-	}
-}
 
 /**
  * @summary Open an image selection dialog
@@ -42,17 +28,9 @@ async function mountSourceDrive() {
  * Notice that by image, we mean *.img/*.iso/*.zip/etc files.
  */
 export async function selectImage(): Promise<string | undefined> {
-	await mountSourceDrive();
-	const options: electron.OpenDialogOptions = {
-		// This variable is set when running in GNU/Linux from
-		// inside an AppImage, and represents the working directory
-		// from where the AppImage was run (which might not be the
-		// place where the AppImage is located). `OWD` stands for
-		// "Original Working Directory".
-		//
-		// See: https://github.com/probonopd/AppImageKit/commit/1569d6f8540aa6c2c618dbdb5d6fcbf0003952b7
-		defaultPath: process.env.OWD,
-		properties: ['openFile', 'treatPackageAsDirectory'],
+	const result = await tauriOpen({
+		multiple: false,
+		directory: false,
 		filters: [
 			{
 				name: i18next.t('source.osImages'),
@@ -63,11 +41,15 @@ export async function selectImage(): Promise<string | undefined> {
 				extensions: ['*'],
 			},
 		],
-	};
-	const currentWindow = remote.getCurrentWindow();
-	const [file] = (await remote.dialog.showOpenDialog(currentWindow, options))
-		.filePaths;
-	return file;
+	});
+
+	// tauriOpen returns null if cancelled, or a string/array for selected file(s)
+	if (result === null) {
+		return undefined;
+	}
+
+	// If multiple is false, result is a single path string
+	return typeof result === 'string' ? result : result?.[0];
 }
 
 /**
@@ -84,34 +66,26 @@ export async function showWarning(options: {
 		rejectionLabel: i18next.t('cancel'),
 	});
 
-	const BUTTONS = [options.confirmationLabel, options.rejectionLabel];
+	// Tauri's ask dialog returns true for "Yes" (first button) and false for "No"
+	const confirmed = await tauriAsk(options.description, {
+		title: options.title,
+		kind: 'warning',
+		okLabel: options.confirmationLabel,
+		cancelLabel: options.rejectionLabel,
+	});
 
-	const BUTTON_CONFIRMATION_INDEX = _.indexOf(
-		BUTTONS,
-		options.confirmationLabel,
-	);
-	const BUTTON_REJECTION_INDEX = _.indexOf(BUTTONS, options.rejectionLabel);
-
-	const { response } = await remote.dialog.showMessageBox(
-		remote.getCurrentWindow(),
-		{
-			type: 'warning',
-			buttons: BUTTONS,
-			defaultId: BUTTON_REJECTION_INDEX,
-			cancelId: BUTTON_REJECTION_INDEX,
-			title: i18next.t('attention'),
-			message: options.title,
-			detail: options.description,
-		},
-	);
-	return response === BUTTON_CONFIRMATION_INDEX;
+	return confirmed;
 }
 
 /**
  * @summary Show error dialog for an Error instance
  */
-export function showError(error: Error) {
+export async function showError(error: Error) {
 	const title = errors.getTitle(error);
-	const message = errors.getDescription(error);
-	remote.dialog.showErrorBox(title, message);
+	const description = errors.getDescription(error);
+	
+	await tauriMessage(description, {
+		title: title,
+		kind: 'error',
+	});
 }

@@ -14,69 +14,58 @@
  * limitations under the License.
  */
 
-import * as _debug from 'debug';
-import * as electron from 'electron';
 import * as _ from 'lodash';
-import { promises as fs } from 'fs';
-import { join } from 'path';
 
-import * as packageJSON from '../../../../package.json';
-
-const debug = _debug('etcher:models:settings');
-
-const JSON_INDENT = 2;
+// Browser-compatible debug (debug package uses process.env which is not available)
+const debug = (...args: any[]) => {
+	if (typeof console !== 'undefined' && console.log) {
+		console.log('[etcher:models:settings]', ...args);
+	}
+};
 
 export const DEFAULT_WIDTH = 800;
 export const DEFAULT_HEIGHT = 480;
 
-/**
- * @summary Userdata directory path
- * @description
- * Defaults to the following:
- * - `%APPDATA%/etcher` on Windows
- * - `$XDG_CONFIG_HOME/etcher` or `~/.config/etcher` on Linux
- * - `~/Library/Application Support/etcher` on macOS
- * See https://electronjs.org/docs/api/app#appgetpathname
- *
- * NOTE: We use the remote property when this module
- * is loaded in the Electron's renderer process
- */
-function getConfigPath() {
-	const app = electron.app || require('@electron/remote').app;
-	return join(app.getPath('userData'), 'config.json');
+// Use localStorage for settings in Tauri (browser environment)
+const STORAGE_KEY = 'etcher-settings';
+
+function readConfigFromStorage(): _.Dictionary<any> {
+	try {
+		const stored = localStorage.getItem(STORAGE_KEY);
+		if (stored) {
+			return JSON.parse(stored);
+		}
+	} catch (error: any) {
+		console.error('Error reading settings:', error);
+	}
+	return {};
 }
 
-async function readConfigFile(filename: string): Promise<_.Dictionary<any>> {
-	let contents = '{}';
+function writeConfigToStorage(data: _.Dictionary<any>): void {
 	try {
-		contents = await fs.readFile(filename, { encoding: 'utf8' });
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 	} catch (error: any) {
-		// noop
-	}
-	try {
-		return JSON.parse(contents);
-	} catch (parseError) {
-		console.error(parseError);
-		return {};
+		console.error('Error writing settings:', error);
+		throw error;
 	}
 }
 
 // exported for tests
 export async function readAll() {
-	return await readConfigFile(getConfigPath());
+	return readConfigFromStorage();
 }
 
 // exported for tests
 export async function writeConfigFile(
-	filename: string,
+	_filename: string,
 	data: _.Dictionary<any>,
 ): Promise<void> {
-	await fs.writeFile(filename, JSON.stringify(data, null, JSON_INDENT));
+	writeConfigToStorage(data);
 }
 
 const DEFAULT_SETTINGS: _.Dictionary<any> = {
 	errorReporting: true,
-	updatesEnabled: ['appimage', 'nsis', 'dmg'].includes(packageJSON.packageType),
+	updatesEnabled: false, // Tauri has its own updater
 	desktopNotifications: true,
 	autoBlockmapping: true,
 	decompressFirst: true,
@@ -102,7 +91,7 @@ export async function set(
 	const previousValue = settings[key];
 	settings[key] = value;
 	try {
-		await writeConfigFileFn(getConfigPath(), settings);
+		await writeConfigFileFn('', settings);
 	} catch (error: any) {
 		// Revert to previous value if persisting settings failed
 		settings[key] = previousValue;

@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import * as electron from 'electron';
-import type * as sdk from 'etcher-sdk';
 import * as _ from 'lodash';
 import type { DrivelistDrive } from '../../../shared/drive-constraints';
 import { bytesToMegabytes } from '../../../shared/units';
@@ -46,8 +44,8 @@ export function isFlashing(): boolean {
  * start a flash process.
  */
 export function setFlashingFlag() {
-	// see https://github.com/balenablocks/balena-electron-env/blob/4fce9c461f294d4a768db8f247eea6f75d7b08b0/README.md#remote-methods
-	electron.ipcRenderer.send('disable-screensaver');
+	// Note: In Tauri, we would use a different mechanism to disable screensaver
+	// For now, we just set the flag without the IPC call
 	store.dispatch({
 		type: Actions.SET_FLASHING_FLAG,
 		data: {},
@@ -69,9 +67,7 @@ export function unsetFlashingFlag(results: {
 		type: Actions.UNSET_FLASHING_FLAG,
 		data: results,
 	});
-	// see https://github.com/balenablocks/balena-electron-env/blob/4fce9c461f294d4a768db8f247eea6f75d7b08b0/README.md#remote-methods
-
-	electron.ipcRenderer.send('enable-screensaver');
+	// Note: In Tauri, we would use a different mechanism to re-enable screensaver
 }
 
 export function setDevicePaths(devicePaths: string[]) {
@@ -107,11 +103,25 @@ export function addFailedDeviceError({
 	});
 }
 
+// Progress state type (compatible with both etcher-sdk and Rust flash progress)
+export interface FlashProgressState {
+	type?: 'decompressing' | 'flashing' | 'verifying';
+	percentage?: number;
+	eta?: number;
+	speed?: number;
+	active?: number;
+	failed?: number;
+	bytesWritten?: number;
+	bytes?: number;
+	position?: number;
+	averageSpeed?: number;
+}
+
 /**
  * @summary Set the flashing state
  */
 export function setProgressState(
-	state: sdk.multiWrite.MultiDestinationProgress,
+	state: FlashProgressState,
 ) {
 	// Preserve only one decimal place
 	const PRECISION = 1;
@@ -123,7 +133,7 @@ export function setProgressState(
 				: undefined,
 
 		speed: _.attempt(() => {
-			if (_.isFinite(state.speed)) {
+			if (state.speed !== undefined && _.isFinite(state.speed)) {
 				return _.round(bytesToMegabytes(state.speed), PRECISION);
 			}
 
