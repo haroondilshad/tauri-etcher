@@ -66,17 +66,30 @@ jobs:
         run: npm ci
 
       # Build Tauri app (includes build:helper via beforeBuildCommand)
-      - name: Build Tauri app
+      # Only create a release when pushing to main/master (not feature branches)
+      - name: Build Tauri app (with release)
+        if: github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref, 'refs/tags/')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing (optional - add secrets if needed)
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: 'balenaEtcher v__VERSION__'
+          releaseBody: |
+            ## What's New
+            - Migrated from Electron to Tauri
+            - Native Rust flash engine (no Node.js sidecar)
+            - Smaller app size
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # Build without release for feature branches
+      - name: Build Tauri app (no release)
+        if: github.ref_name != 'main' && github.ref_name != 'master' && !startsWith(github.ref, 'refs/tags/')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
 
